@@ -7,7 +7,7 @@ A simple paginator for when you don't need an unlimited scroll.
 ```elixir
 def deps do
   [
-    {:limit_offset_paginator, "~> 1.0.0"}
+    {:limit_offset_paginator, "~> 1.0.1"}
   ]
 end
 ```
