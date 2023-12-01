@@ -217,8 +217,8 @@ defmodule LimitOffsetPaginator do
 
         %{
           list: @repo.all(query),
-          page: round(offset / limit) + 1,
-          page_count: round(unlimited / limit) + 1,
+          page: floor(offset / limit) + 1,
+          page_count: ceil(unlimited / limit),
           total_count: unlimited
         }
       end
@@ -228,8 +228,8 @@ defmodule LimitOffsetPaginator do
 
         %{
           list: @repo.all(query),
-          page: round(offset / limit) + 1,
-          page_count: round(unlimited / limit) + 1,
+          page: floor(offset / limit) + 1,
+          page_count: ceil(unlimited / limit),
           total_count: unlimited
         }
       end
@@ -239,8 +239,8 @@ defmodule LimitOffsetPaginator do
 
         %{
           list: @repo.all(query),
-          page: round(offset / limit) + 1,
-          page_count: round(unlimited / limit) + 1,
+          page: floor(offset / limit) + 1,
+          page_count: ceil(unlimited / limit),
           total_count: unlimited
         }
       end
@@ -254,8 +254,8 @@ defmodule LimitOffsetPaginator do
 
           %{
             list: @repo.all(query),
-            page: round(offset / limit) + 1,
-            page_count: round(unlimited / limit) + 1,
+            page: floor(offset / limit) + 1,
+            page_count: ceil(unlimited / limit),
             total_count: unlimited
           }
         end
