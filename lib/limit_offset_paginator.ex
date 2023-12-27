@@ -40,7 +40,7 @@ defmodule LimitOffsetPaginator do
       `field` - when `enable_custom_field` is turned on, this parameter will be used for order by.
       `limit` or `l` - when `enable_custom_limit` is turned on, it will be used instead of the default limit set by default values.
       `page` or `p` - what page needs to be fetched.
-      `filter` or `f` - receives a string in this format: "path.to.key:filter_value:filter_type|path.t...". Automatically converts `filter_value` to a required field type from the schema. `filter_type` can be one of "in", "inc", "includes" if you need an `ilike`; "ex", "exc", "excludes" for `not ilike`; "eq", "equal" for `==`; "diff", "different" for `!=`; "mo", "more" for `>`; "le", "less" for `<`; "moq", "moreequal" for `>=`; "leq", "lessequal" for `<=`. Multiple filters can be added by dividing the string with a "|".
+      `filter` or `f` - receives a string in this format: "path.to.key:filter_value:filter_type|path.t...". Automatically converts `filter_value` to a required field type from the schema. `filter_type` can be one of "in", "inc", "includes" if you need an `ilike`; "ex", "exc", "excludes" for `not ilike`; "eq", "equal" for `==`; "dif", "different" for `!=`; "eql", "equallist" for `in`; "difl", "differentlist" for `not in` (for this and eql use , to separate multiple values); "mo", "more" for `>`; "le", "less" for `<`; "moq", "moreequal" for `>=`; "leq", "lessequal" for `<=`. Multiple filters can be added by dividing the string with a "|".
       `sort` or `s` - receives a string in this format: "path.to.key:sort_direction|path.t...". Like `filter`, the function can find fields present in maps in a `select` statement or main schema if `select` is nil. `sort_direction` can be "asc", "ascending" or "desc", "descending". Can sort many fields by dividing the string with a "|".
       `offset` - when `enable_custom_offset` is turned on, it will be used instead of the default offset set by default values.
       `search_string` or `search` or `ss` - when this value is passed, string fields from the `from` schema or the `select` statement if it is present will be compared to the passed `search_string`. This directly alters the query, but keeps previous where clauses.
@@ -65,19 +65,31 @@ defmodule LimitOffsetPaginator do
       def paginate(query, params), do: start(query, params)
 
       def start(query, params) do
-        field = field_handler(params) # Get default field to order by for limit and offset to work
-        limit = limit_handler(params) # Get limit from params or if it's not there kee default
-        offset = offset_handler(params) # Get offset from params by way of page or offset fields or if not from default
+        # Get default field to order by for limit and offset to work
+        field = field_handler(params)
+        # Get limit from params or if it's not there kee default
+        limit = limit_handler(params)
+        # Get offset from params by way of page or offset fields or if not from default
+        offset = offset_handler(params)
 
-        query
+        unlimited =
+          query
+          # add filters to where if the string is not empty
+          |> filter_handler(params)
+          # add where to all string fields if search_string is not empty
+          |> search_handler(params)
+
+        unlimited
         # DONE: add more ordering options
-        |> order_handler(params, field) # adds fields from select or schema to order_bys if string is not empty
-        |> limit(^limit) # add limit to query
-        |> offset(^offset) # add offset to query
+        # adds fields from select or schema to order_bys if string is not empty
+        |> order_handler(params, field)
+        # add limit to query
+        |> limit(^limit)
+        # add offset to query
+        |> offset(^offset)
         # DONE: add complex filters, custom search fields taken from a select query
-        |> filter_handler(params) # add filters to where if the string is not empty
-        |> search_handler(params) # add where to all string fields if search_string is not empty
-        |> count_handler(query, params, field, limit, offset) # get list and if needed total counts
+        # get list and if needed total counts
+        |> count_handler(unlimited, params, field, limit, offset)
       end
 
       defp order_handler(query, %{sort: sort}, _) when is_bitstring(sort),
@@ -87,15 +99,20 @@ defmodule LimitOffsetPaginator do
         do: order_handler(query, %{"sort" => sort}, "")
 
       defp order_handler(query, %{"sort" => sort}, _) when is_bitstring(sort) do
-        String.split(sort, "|") # split string in case of multiple sorting fields
-        |> Enum.reduce(query, fn sort, query -> # update query in a reduce
-          [field, direction] = String.split(sort, ":") # get path to field and direction of sorting
+        # split string in case of multiple sorting fields
+        String.split(sort, "|")
+        # update query in a reduce
+        |> Enum.reduce(query, fn sort, query ->
+          # get path to field and direction of sorting
+          [field, direction] = String.split(sort, ":")
 
           if is_nil(query.select) do
-            order_by(query, [n], {^direction_helper(direction), field(n, ^field)}) # if no select add ordering to first element of query
+            # if no select add ordering to first element of query
+            order_by(query, [n], {^direction_helper(direction), field(n, ^field)})
           else
             try do
-              expression = get_field(field, query) # get field expression from select
+              # get field expression from select
+              expression = get_field(field, query)
 
               Map.put(query, :order_bys, [
                 %Ecto.Query.QueryExpr{
@@ -113,9 +130,11 @@ defmodule LimitOffsetPaginator do
         end)
       end
 
-      defp order_handler(query, _, field) do # if no order is chosen apply default ordering to keep a working pagination
+      # if no order is chosen apply default ordering to keep a working pagination
+      defp order_handler(query, _, field) do
         order_by(query, [n], {:asc, field(n, ^field)})
       end
+
       # convert strings and abbreviations to atoms
       defp direction_helper(direction) when direction in [:asc, :desc], do: direction
 
@@ -128,8 +147,10 @@ defmodule LimitOffsetPaginator do
 
       defp direction_helper(_), do: :asc
 
-      if Keyword.get(opts, :enable_custom_field, true) do # don't compile if disabled
-        defp field_handler(%{"field" => field}) when is_bitstring(field), # change default field for ordering
+      # don't compile if disabled
+      if Keyword.get(opts, :enable_custom_field, true) do
+        # change default field for ordering
+        defp field_handler(%{"field" => field}) when is_bitstring(field),
           do: String.to_existing_atom(field)
 
         defp field_handler(%{field: field}) when is_bitstring(field),
@@ -141,8 +162,10 @@ defmodule LimitOffsetPaginator do
 
       defp field_handler(_), do: @field
 
-      if Keyword.get(opts, :enable_custom_limit, true) do # don't compile if disabled
-        defp limit_handler(%{"limit" => limit}) when limit <= 0, do: 1 # set limits from a string or integer and disable negative or 0 values
+      # don't compile if disabled
+      if Keyword.get(opts, :enable_custom_limit, true) do
+        # set limits from a string or integer and disable negative or 0 values
+        defp limit_handler(%{"limit" => limit}) when limit <= 0, do: 1
         defp limit_handler(%{"l" => limit}) when limit <= 0, do: 1
         defp limit_handler(%{limit: limit}) when limit <= 0, do: 1
 
@@ -159,7 +182,8 @@ defmodule LimitOffsetPaginator do
 
       defp limit_handler(_), do: @limit
 
-      defp offset_handler(%{"page" => page}) when page <= 0, do: 0 # set offset from a page or custom offset, restrict negative values
+      # set offset from a page or custom offset, restrict negative values
+      defp offset_handler(%{"page" => page}) when page <= 0, do: 0
       defp offset_handler(%{"p" => page}) when page <= 0, do: 0
       defp offset_handler(%{page: page}) when page <= 0, do: 0
 
@@ -195,19 +219,26 @@ defmodule LimitOffsetPaginator do
 
       defp offset_handler(_), do: @offset
 
-      defp filter_handler(query, %{filter: filter}) when is_bitstring(filter), do: filter_handler(query, %{"filter" => filter})
+      defp filter_handler(query, %{filter: filter}) when is_bitstring(filter),
+        do: filter_handler(query, %{"filter" => filter})
 
-      defp filter_handler(query, %{"f" => filter}) when is_bitstring(filter), do: filter_handler(query, %{"filter" => filter})
+      defp filter_handler(query, %{"f" => filter}) when is_bitstring(filter),
+        do: filter_handler(query, %{"filter" => filter})
 
       defp filter_handler(query, %{"filter" => filter}) when is_bitstring(filter) do
-        String.split(filter, "|") # split string in case of multiple sorting fields
-        |> Enum.reduce(query, fn filter, query -> # update query in a reduce
-          [field, value, t] = String.split(filter, ":") # get path to field, value for filtering and type of filter
+        # split string in case of multiple sorting fields
+        String.split(filter, "|")
+        # update query in a reduce
+        |> Enum.reduce(query, fn filter, query ->
+          # get path to field, value for filtering and type of filter
+          [field, value, t] = String.split(filter, ":")
 
           if is_nil(query.select) do
+            # get type of field from main schema
             {expr, params} =
-              elem(query.from.source, 1).__schema__(:type, field) # get type of field from main schema
-              |> filter_case({{:., [], [{:&, [], [0]}, field]}, [], []}, value, t) # get correct expression for where insertion
+              elem(query.from.source, 1).__schema__(:type, field)
+              # get correct expression for where insertion
+              |> filter_case({{:., [], [{:&, [], [0]}, field]}, [], []}, value, t)
 
             Map.put(query, :wheres, [
               %Ecto.Query.BooleanExpr{
@@ -222,16 +253,23 @@ defmodule LimitOffsetPaginator do
             ])
           else
             try do
+              # get field from select expression
               {expr, params} =
-                get_field(field, query) # get field from select expression
+                get_field(field, query)
                 |> case do
-                  {{:., [], [{:&, [], [0]}, field]}, [], []} = expression -> # if from main schema
-                    elem(query.from.source, 1).__schema__(:type, field) # same as above
-                    |> filter_case(expression, value, t) # same as above
+                  # if from main schema
+                  {{:., [], [{:&, [], [0]}, field]}, [], []} = expression ->
+                    # same as above
+                    elem(query.from.source, 1).__schema__(:type, field)
+                    # same as above
+                    |> filter_case(expression, value, t)
 
-                  {{:., [], [{:&, [], [number]}, field]}, [], []} = expression -> # if from joins
-                    elem(Enum.at(query.joins, number - 1).source, 1).__schema__(:type, field) # get type of field from join schema
-                    |> filter_case(expression, value, t) # same as above
+                  # if from joins
+                  {{:., [], [{:&, [], [number]}, field]}, [], []} = expression ->
+                    # get type of field from join schema
+                    elem(Enum.at(query.joins, number - 1).source, 1).__schema__(:type, field)
+                    # same as above
+                    |> filter_case(expression, value, t)
                 end
 
               Map.put(query, :wheres, [
@@ -255,34 +293,78 @@ defmodule LimitOffsetPaginator do
       defp filter_handler(query, _), do: query
 
       defp filter_case(result, expression, value, t) do
+        if t in ["eql", "equallist", "difl", "differentlist"] and not is_list(value) do
+          value =
+          String.split(value, ",", trim: true)
+          |> Enum.map(fn value ->
+            type_filter(result, value)
+          end)
+          filter_case(result, expression, value, t)
+        else
+          case result do
+            :string ->
+              filter_helper(expression, value, :string, t)
+
+            type when type in [:id, :integer] ->
+              filter_helper(expression, type_filter(result, value), type, t)
+
+            :date_time ->
+              filter_helper(expression, type_filter(result, value), :date_time, t)
+
+            :naive_date_time ->
+              filter_helper(expression, type_filter(result, value), :naive_date_time, t)
+
+            :date ->
+              filter_helper(expression, type_filter(result, value), :date, t)
+
+            :time ->
+              filter_helper(expression, type_filter(result, value), :time, t)
+
+            :boolean ->
+              filter_helper(expression, type_filter(result, value), :boolean, t)
+
+            :float ->
+              filter_helper(expression, type_filter(result, value), :float, t)
+
+            type ->
+              type.type
+              |> filter_case(expression, type_filter(result, value), t)
+          end
+        end
+      end
+
+      defp type_filter(_result, value) when is_list(value) do
+        value
+      end
+
+      defp type_filter(result, value) do
         case result do
           :string ->
-            filter_helper(expression, value, :string, t)
+            value
 
           type when type in [:id, :integer] ->
-            filter_helper(expression, String.to_integer(value), type, t)
+            String.to_integer(value)
 
           :date_time ->
-            filter_helper(expression, DateTime.from_iso8601(value), :date_time, t)
+            DateTime.from_iso8601(value)
 
           :naive_date_time ->
-            filter_helper(expression, NaiveDateTime.from_iso8601!(value), :naive_date_time, t)
+            NaiveDateTime.from_iso8601!(value)
 
           :date ->
-            filter_helper(expression, Date.from_iso8601!(value), :date, t)
+            Date.from_iso8601!(value)
 
           :time ->
-            filter_helper(expression, Time.from_iso8601!(value), :time, t)
+            Time.from_iso8601!(value)
 
           :boolean ->
-            filter_helper(expression, String.to_atom(value), :boolean, t)
+            String.to_atom(value)
 
           :float ->
-            filter_helper(expression, String.to_float(value), :float, t)
+            String.to_float(value)
 
           type ->
-            type.type
-            |> filter_case(expression, value, t)
+            value
         end
       end
 
@@ -297,6 +379,12 @@ defmodule LimitOffsetPaginator do
 
       defp filter_helper(expression, value, type, t) when t in ["dif", "different"],
         do: {{:!=, [], [expression, {:^, [], [0]}]}, {value, type}}
+
+      defp filter_helper(expression, value, type, t) when t in ["eql", "equallist"],
+        do: {{:in, [], [expression, {:^, [], [0]}]}, {value, {:in, type}}}
+
+      defp filter_helper(expression, value, type, t) when t in ["difl", "differentlist"],
+        do: {{:not, [], [{:in, [], [expression, {:^, [], [0]}]}]}, {value, {:in, type}}}
 
       defp filter_helper(expression, value, type, t) when t in ["mo", "more"],
         do: {{:>, [], [expression, {:^, [], [0]}]}, {value, type}}
@@ -333,19 +421,24 @@ defmodule LimitOffsetPaginator do
       defp search_handler(query, _), do: query
 
       defp search_helper(query, string) do
-        {fields, params} = field_helper(query, string) # get all string fields from select expression or from main schema if no select clause present
+        # get all string fields from select expression or from main schema if no select clause present
+        {fields, params} = field_helper(query, string)
 
         case length(fields) do
           0 ->
-            query # if no string fields return unchanged
+            # if no string fields return unchanged
+            query
 
           1 ->
-            put_bool(query, hd(fields), params) # if one insert into wheres as boolean
+            # if one insert into wheres as boolean
+            put_bool(query, hd(fields), params)
 
           _ ->
-            [first | fields] = Enum.reverse(fields) # if multiple, reverse the order
+            # if multiple, reverse the order
+            [first | fields] = Enum.reverse(fields)
 
-            put_bool( # insert them into wheres with an OR statement between them
+            # insert them into wheres with an OR statement between them
+            put_bool(
               query,
               Enum.reduce(
                 fields,
@@ -406,7 +499,8 @@ defmodule LimitOffsetPaginator do
              )
 
       defp collect_fields(query, list, fields \\ []) do
-        Enum.reduce(list, fields, fn # recursively pull all string fields from select expression
+        # recursively pull all string fields from select expression
+        Enum.reduce(list, fields, fn
           {_, {:%{}, [], list}}, fields ->
             collect_fields(query, list, fields)
 
@@ -430,7 +524,8 @@ defmodule LimitOffsetPaginator do
         end)
       end
 
-      defp collect_helper(%{from: %{source: {_, s}}} = query, field, fields, 0) do # if from main schema
+      # if from main schema
+      defp collect_helper(%{from: %{source: {_, s}}} = query, field, fields, 0) do
         if s.__schema__(:type, field) == :string do
           [{{:., [], [{:&, [], [0]}, field]}, [], []} | fields]
         else
@@ -438,7 +533,8 @@ defmodule LimitOffsetPaginator do
         end
       end
 
-      defp collect_helper(query, field, fields, number) do # if from join schema
+      # if from join schema
+      defp collect_helper(query, field, fields, number) do
         try do
           if elem(Enum.at(query.joins, number - 1).source, 1).__schema__(:type, field) ==
                :string do
