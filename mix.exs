@@ -4,7 +4,7 @@ defmodule LimitOffsetPaginator.MixProject do
   def project do
     [
       app: :limit_offset_paginator,
-      version: "1.1.0",
+      version: "1.1.1",
       elixir: "~> 1.13",
       start_permanent: Mix.env() == :prod,
       description: description(),
