@@ -236,7 +236,7 @@ defmodule LimitOffsetPaginator do
           if is_nil(query.select) do
             # get type of field from main schema
             {expr, params} =
-              elem(query.from.source, 1).__schema__(:type, field)
+              elem(query.from.source, 1).__schema__(:type, if(is_atom(field), do: field, else: String.to_existing_atom(field)))
               # get correct expression for where insertion
               |> filter_case({{:., [], [{:&, [], [0]}, field]}, [], []}, value, t)
 
@@ -485,7 +485,7 @@ defmodule LimitOffsetPaginator do
           )
 
       defp field_helper(
-             %{select: %Ecto.Query.SelectExpr{expr: {:%{}, [], list}}} = query,
+             %{select: %Ecto.Query.SelectExpr{expr: {_, [], list}}} = query,
              string
            ),
            do:
